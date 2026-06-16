@@ -1,0 +1,10 @@
+{
+  "classes": [
+    "elevated_context_risk",
+    "high_air_risk",
+    "high_physiological_risk",
+    "high_risk_combined",
+    "normal",
+    "rising_stress"
+  ]
+}

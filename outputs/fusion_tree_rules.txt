@@ -1,0 +1,22 @@
+|--- p_stress <= 0.42
+|   |--- air_risk <= 0.65
+|   |   |--- p_trend <= 0.07
+|   |   |   |--- p_trend <= -0.03
+|   |   |   |   |--- class: normal
+|   |   |   |--- p_trend >  -0.03
+|   |   |   |   |--- class: normal
+|   |   |--- p_trend >  0.07
+|   |   |   |--- p_stress <= 0.18
+|   |   |   |   |--- class: normal
+|   |   |   |--- p_stress >  0.18
+|   |   |   |   |--- class: normal
+|   |--- air_risk >  0.65
+|   |   |--- p_x_air <= 0.20
+|   |   |   |--- class: high_air_risk
+|   |   |--- p_x_air >  0.20
+|   |   |   |--- class: elevated_context_risk
+|--- p_stress >  0.42
+|   |--- air_risk <= 0.65
+|   |   |--- class: high_physiological_risk
+|   |--- air_risk >  0.65
+|   |   |--- class: high_risk_combined
