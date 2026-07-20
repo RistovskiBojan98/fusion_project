@@ -1,177 +1,86 @@
 # Ambient Intelligence for Health Deterioration Detection
 
-This repository contains a university research prototype for detecting possible
-health deterioration by combining two signal sources:
+This repository contains a university research prototype for context-aware stress
+and deterioration warning. It combines:
 
-- physiological signals from the WESAD wearable stress dataset
-- environmental signals from the UCI Air Quality dataset
+- WESAD physiological data: chest ECG, respiration, and stress labels
+- UCI Air Quality data: outdoor pollutant and weather measurements
 
-The project is not a medical device. It is an engineering prototype that shows
-how wearable physiology and ambient air quality can be processed, fused, and
-turned into interpretable warning states.
+The goal is not to build a medical device. The goal is to show a transparent
+ambient-intelligence pipeline where body signals and environmental context are
+processed separately, then fused into explainable warning states.
 
-## Project Goal
-
-The central question is:
-
-> Can wearable physiology and air-quality context be combined into an
-> interpretable early-warning state?
-
-The motivation is that a person's risk state may depend on both body signals and
-the surrounding environment. For example, moderate physiological stress may be
-more concerning when outdoor air quality is poor than when the environment is
-safe.
-
-The system therefore builds a full pipeline:
-
-1. Load physiological data from WESAD.
-2. Extract ECG, heart-rate-variability, and respiration features.
-3. Train stress-detection models with subject-separated validation.
-4. Load and clean air-quality measurements.
-5. Convert pollutants into a normalized air-risk score.
-6. Fuse stress probability and air risk into warning states.
-7. Smooth the final state stream to reduce noisy alert changes.
-
-## Datasets
-
-### WESAD
-
-WESAD is used for physiological modeling. This project uses the chest ECG,
-chest respiration, and WESAD labels.
-
-Expected structure:
+## Pipeline
 
 ```text
-data/wesad/
-  S2/S2.pkl
-  S3/S3.pkl
-  ...
+WESAD ECG/RESP
+  -> 60-second windows
+  -> HR, HRV, respiration features
+  -> subject-grouped stress models
+  -> calibrated p_stress
+
+UCI Air Quality
+  -> cleaned hourly pollutant data
+  -> configurable CO/NO2/NOx risk weights
+  -> air_risk score
+
+p_stress + air_risk + trend
+  -> baseline comparisons and rule-based fusion
+  -> status, action, rationale
 ```
 
-The local copy may be named `data/WESAD` on Windows. On a case-sensitive system,
-rename it to `data/wesad` or adjust `WesadConfig.root_dir` in
-`src/wesad_loader.py`.
+The WESAD and UCI Air Quality datasets were not collected from the same people
+or at the same time. Therefore, the fusion step is a scenario-based contextual
+evaluation, not causal health validation. Air quality is used to test how an
+ambient context signal could modify decisions from a wearable stress model.
 
-Labels are converted into a binary stress task:
+## Main Components
 
-- label `2` -> stress
-- labels `1`, `3`, and `4` -> non-stress
-- undefined labels are ignored
+### 1. Physiological Stress Model
 
-### UCI Air Quality
-
-The UCI Air Quality dataset is used as environmental context.
-
-Expected file:
+`scripts/build_wesad_features.py` loads WESAD subject files and extracts window
+features from ECG and respiration. The resulting feature table is saved as:
 
 ```text
-data/air_quality/AirQualityUCI.csv
+outputs/wesad_window_features.csv
 ```
 
-The loader handles the dataset's semicolon-separated format, decimal commas,
-missing values marked as `-200`, datetime parsing, hourly resampling, and
-interpolation.
+`scripts/train_physio_model_strict.py` trains subject-aware models with
+`GroupKFold`, so windows from the same subject do not appear in both train and
+test folds. It keeps RandomForest as the main compatible model and also tries:
 
-The air-risk score uses these pollutant columns when available:
+- XGBoost, if `xgboost` is installed
+- LightGBM, if `lightgbm` is installed
 
-- `CO(GT)`
-- `NO2(GT)`
-- `NOx(GT)`
+If those optional libraries are missing, the script prints a clear skip message
+and continues with RandomForest.
 
-Temperature and relative humidity can add a small weather modifier.
+The strict workflow includes imputation, subject-wise normalization, out-of-fold
+prediction, isotonic calibration, threshold tuning, fold-wise reporting, and
+subject-level reporting.
 
-## Repository Structure
+### 2. Environmental Air-Risk Model
 
-```text
-src/
-  wesad_loader.py          Load WESAD subject files.
-  physio_features.py       Build physiological window features.
-  subject_norm.py          Subject-wise normalization.
-  physio_infer.py          Stress-probability inference helper.
-  air_quality_loader.py    Load and clean UCI Air Quality data.
-  air_risk.py              Convert pollutants into a 0-1 risk score.
-  fusion_policy.py         Rule-based physiology plus air-risk fusion.
-  fusion_features.py       Feature builder for learned fusion.
-  fusion_action_map.py     Map states to actions and rationales.
-  smoothing.py             EMA smoothing and hysteresis.
-  state_postprocess.py     Stabilize special warning states.
+`src/air_quality_loader.py` loads the UCI Air Quality CSV, handles decimal
+commas, missing values, datetime parsing, resampling, and interpolation.
 
-scripts/
-  build_wesad_features.py          Build WESAD feature CSV.
-  train_physio_model.py            Train baseline stress models.
-  train_physio_model_strict.py     Train calibrated random-forest bundle.
-  test_air_quality.py              Check air-quality loading.
-  test_air_risk.py                 Build air-risk diagnostics.
-  run_fusion_demo.py               Run rule-based fusion demo.
-  train_fusion_model.py            Train explainable fusion tree.
-  run_fusion_demo_learned.py       Run learned and smoothed fusion demo.
+`src/air_risk.py` converts pollutant measurements into a score in `[0, 1]`.
+Default pollutant weights are:
 
-outputs/
-  models/                          Trained model artifacts.
-  figures/                         Diagnostic plots.
-  wesad_window_features.csv
-  physio_model_metrics.json
-  physio_model_metrics_strict.json
-  fusion_demo_results_strict.csv
-  fusion_demo_results_learned_smoothed.csv
-  fusion_tree_rules.txt
-```
+- CO: `0.20`
+- NO2: `0.40`
+- NOx: `0.40`
 
-## Method
+NO2 and NOx are weighted more heavily by default because they are useful
+traffic-related outdoor pollution signals for this scenario. The weights are
+configurable, and `scripts/run_air_weight_sensitivity.py` compares several
+weight settings against the default.
 
-### Physiological Modeling
+### 3. Fusion Decision Layer
 
-The WESAD recordings are split into 60-second windows with 50 percent overlap.
-For each window, the project extracts features such as:
-
-- mean heart rate
-- heart-rate variability using RMSSD and SDNN
-- ECG peak count
-- respiration rate
-- respiration variability
-
-The resulting feature table contains 1,499 windows from 15 WESAD subjects:
-
-- 1,167 non-stress windows
-- 332 stress windows
-
-Because physiological signals are person-specific, the models are evaluated with
-`GroupKFold`, using `subject_id` as the group. This prevents windows from the
-same person appearing in both training and test folds.
-
-Two training stages are included:
-
-- a baseline logistic regression and random forest
-- a stricter calibrated random-forest bundle for downstream fusion
-
-### Air-Risk Modeling
-
-The air-quality module converts pollutants into normalized risk components:
-
-- `risk_CO`
-- `risk_NO2`
-- `risk_NOx`
-- `risk_weather`
-- `air_risk_score`
-
-The default pollutant weights are:
-
-- CO: `0.2`
-- NO2: `0.4`
-- NOx: `0.4`
-
-The score is clipped to the range `[0, 1]`, where higher values mean higher
-environmental risk.
-
-### Fusion
-
-The fusion layer combines:
-
-- calibrated physiological stress probability, `p_stress`
-- environmental score, `air_risk`
-- recent trend in stress probability
-
-It outputs one of these interpretable states:
+`scripts/run_fusion_demo.py` combines calibrated stress probability,
+scenario-aligned air risk, and stress trend. The rule-based policy in
+`src/fusion_policy.py` outputs:
 
 | State | Meaning |
 | --- | --- |
@@ -182,82 +91,90 @@ It outputs one of these interpretable states:
 | `rising_stress` | Stress probability is increasing. |
 | `high_risk_combined` | Physiology and air quality are both high risk. |
 
-Each state is mapped to a recommended action and a short rationale. A shallow
-decision tree is also trained to learn the rule-based fusion policy while
-remaining easy to inspect in `outputs/fusion_tree_rules.txt`.
+Each state receives an action and rationale. `scripts/run_fusion_comparison.py`
+adds non-causal scenario metrics comparing:
 
-The learned demo then applies exponential moving average smoothing, hysteresis,
-and minimum dwell times so the final alert stream does not change too rapidly.
+- physiology-only decisions
+- air-risk-only decisions
+- a simple weighted-score baseline
+- the current rule-based fusion policy
 
-## Results
+## Key Outputs
 
-Baseline physiological stress detection:
+Physiology:
+
+```text
+outputs/physio_model_metrics_strict.json
+outputs/physio_groupkfold_fold_metrics.csv
+outputs/physio_subject_level_metrics.csv
+outputs/models/physio_rf_strict_calibrated_bundle.joblib
+outputs/models/physio_xgboost_strict_calibrated_bundle.joblib
+outputs/models/physio_lightgbm_strict_calibrated_bundle.joblib
+```
+
+Fusion and air-risk:
+
+```text
+outputs/fusion_demo_results_strict.csv
+outputs/fusion_comparison_metrics.csv
+outputs/air_weight_sensitivity.csv
+outputs/fusion_demo_results_learned_smoothed.csv
+outputs/models/fusion_decision_tree.joblib
+outputs/figures/
+```
+
+The new physiology CSVs report balanced accuracy, precision, recall, F1, PR-AUC,
+ROC-AUC when available, threshold used, confusion matrix values, sample counts,
+class distributions, fold test subjects, and subject-level out-of-fold behavior.
+PR-AUC and ROC-AUC are written as missing values when a fold or subject contains
+only one class.
+
+The fusion comparison file reports scenario-level behavior, including high-risk
+alert counts, decision stability, action differences compared with
+physiology-only decisions, average severity, status/action distributions, and
+whether decisions include rationales.
+
+## Results Snapshot
+
+Earlier RandomForest baseline physiology results:
 
 | Model | AUC | F1 | Accuracy |
 | --- | ---: | ---: | ---: |
 | Logistic regression | 0.855 | 0.581 | 0.777 |
 | Random forest | 0.883 | 0.620 | 0.817 |
 
-Strict calibrated physiology model:
+Strict calibrated physiology model comparison:
 
-| Metric | Value |
-| --- | ---: |
-| Calibrated out-of-fold AUC | 0.831 |
-| Calibrated Brier score | 0.112 |
-| Best F1 threshold | 0.24 |
-| Cost-sensitive threshold | 0.31 |
+| Model | ROC-AUC | PR-AUC | Brier | Threshold | F1 | Precision | Recall | Balanced Acc. | Accuracy |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| RandomForest | 0.837 | 0.687 | 0.107 | 0.24 | 0.621 | 0.697 | 0.560 | 0.745 | 0.849 |
+| XGBoost | 0.843 | 0.684 | 0.105 | 0.23 | 0.598 | 0.526 | 0.693 | 0.758 | 0.794 |
+| LightGBM | 0.833 | 0.693 | 0.107 | 0.30 | 0.605 | 0.744 | 0.509 | 0.730 | 0.853 |
 
-The calibrated model is used for fusion because it produces probabilities that
-are more suitable for thresholds and downstream decision rules.
+Confusion values at each model's best-F1 threshold:
+
+| Model | TP | FP | TN | FN |
+| --- | ---: | ---: | ---: | ---: |
+| RandomForest | 186 | 81 | 1086 | 146 |
+| XGBoost | 230 | 207 | 960 | 102 |
+| LightGBM | 169 | 58 | 1109 | 163 |
+
+XGBoost has the highest ROC-AUC and recall, so it catches more stress windows
+but creates more false positives. LightGBM is more conservative, with the best
+precision and accuracy but lower recall.
 
 Rule-based strict fusion output:
 
 | Status | Count |
 | --- | ---: |
-| `normal` | 1,026 |
-| `high_physiological_risk` | 217 |
-| `high_air_risk` | 112 |
-| `rising_stress` | 92 |
-| `elevated_context_risk` | 27 |
-| `high_risk_combined` | 25 |
+| `normal` | 983 |
+| `high_physiological_risk` | 288 |
+| `high_air_risk` | 129 |
+| `rising_stress` | 64 |
+| `high_risk_combined` | 33 |
+| `elevated_context_risk` | 2 |
 
-Learned and smoothed fusion output:
-
-| Status | Count |
-| --- | ---: |
-| `normal` | 1,175 |
-| `high_physiological_risk` | 248 |
-| `high_air_risk` | 43 |
-| `high_risk_combined` | 21 |
-| `rising_stress` | 12 |
-
-These results show that the prototype can separate different kinds of risk
-instead of producing only a single generic alarm.
-
-## Main Takeaways
-
-- Subject-aware validation is important for wearable physiology.
-- Accuracy alone is not enough because stress windows are the minority class.
-- Calibration improves the usefulness of stress probabilities for fusion.
-- Air quality changes how a physiological stress signal should be interpreted.
-- Explainable fusion rules make the final recommendations easier to understand.
-- Smoothing and hysteresis are important for realistic alert behavior.
-
-## Limitations
-
-- WESAD and UCI Air Quality were not collected from the same people at the same
-  time. The fusion demo uses synthetic alignment.
-- The ECG and respiration feature extraction is intentionally lightweight.
-- The air-risk thresholds are engineering defaults, not clinical or regulatory
-  thresholds.
-- WESAD labels represent controlled experimental stress, not all forms of health
-  deterioration.
-- The system has not been validated on real synchronized wearable and
-  environmental recordings.
-- The recommendations are illustrative and should not be treated as medical
-  advice.
-
-## How to Reproduce
+## How to Run
 
 Install dependencies:
 
@@ -265,35 +182,58 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-Run the full workflow:
+Feature extraction:
 
 ```bash
-py scripts/test_wesad_loader.py
 py scripts/build_wesad_features.py
-py scripts/train_physio_model.py
+```
+
+Strict physiology training with fold-wise and subject-level metrics:
+
+```bash
 py scripts/train_physio_model_strict.py
-py scripts/test_air_quality.py
-py scripts/test_air_risk.py
+```
+
+Rule-based fusion demo:
+
+```bash
 py scripts/run_fusion_demo.py
+```
+
+Fusion comparison:
+
+```bash
+py scripts/run_fusion_comparison.py
+```
+
+Air-weight sensitivity analysis:
+
+```bash
+py scripts/run_air_weight_sensitivity.py
+```
+
+Optional learned fusion workflow:
+
+```bash
 py scripts/train_fusion_model.py
 py scripts/run_fusion_demo_learned.py
 ```
 
-Important generated files:
+## Limitations
 
-```text
-outputs/wesad_window_features.csv
-outputs/models/physio_rf_strict_calibrated_bundle.joblib
-outputs/models/fusion_decision_tree.joblib
-outputs/fusion_demo_results_strict.csv
-outputs/fusion_demo_results_learned_smoothed.csv
-outputs/figures/
-```
+- WESAD and UCI Air Quality are not synchronized; fusion is scenario-based.
+- WESAD stress labels come from controlled experimental conditions.
+- ECG and respiration feature extraction is intentionally lightweight.
+- Air-risk weights and thresholds are engineering assumptions, not clinical or
+  regulatory standards.
+- The system has not been validated on real synchronized wearable and
+  environmental recordings.
+- Recommendations are illustrative and should not be treated as medical advice.
 
 ## Summary
 
-This project demonstrates a transparent ambient-intelligence pipeline. It starts
-with physiological and environmental data, converts them into interpretable risk
-signals, and fuses them into warning states with actions and rationales. The
-result is a compact but complete prototype that can be understood, reproduced,
-and discussed in an academic setting.
+The project demonstrates how a wearable stress detector, an environmental
+air-risk model, and an explainable fusion policy can be combined into a compact
+ambient-intelligence prototype. The added evaluations make the model behavior
+clearer by reporting fold-level, subject-level, baseline-comparison, and
+air-weight sensitivity results.

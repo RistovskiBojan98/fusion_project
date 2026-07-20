@@ -9,19 +9,19 @@ STATUS_TO_ACTION: Dict[str, Dict[str, str]] = {
         "rationale": "High physiological stress while outdoor air risk is high; combined load increases deterioration risk.",
     },
     "high_physiological_risk": {
-        "action": "Reduce intensity; take a break; hydrate; do 2–3 minutes of slow breathing.",
+        "action": "Reduce intensity; take a break; hydrate; do 2-3 minutes of slow breathing.",
         "rationale": "Physiological stress is high; prioritize recovery and breathing regulation.",
     },
     "elevated_context_risk": {
         "action": "Avoid running/HIIT outdoors; choose low intensity or indoor activity.",
-        "rationale": "Moderate physiological strain + high air risk suggests exposure-driven risk; adjust behavior.",
+        "rationale": "Moderate physiological strain plus high air risk suggests exposure-driven risk; adjust behavior.",
     },
     "high_air_risk": {
         "action": "Limit outdoor exposure; consider mask; keep intensity low; prefer indoors.",
         "rationale": "Air risk is high even without strong physiological stress; context warrants protective behavior.",
     },
     "rising_stress": {
-        "action": "Your stress is trending up—slow down and take a short recovery break.",
+        "action": "Your stress is trending up; slow down and take a short recovery break.",
         "rationale": "Stress likelihood is rising; early intervention helps prevent deterioration.",
     },
     "normal": {
@@ -33,13 +33,13 @@ STATUS_TO_ACTION: Dict[str, Dict[str, str]] = {
 
 def attach_actions(df, status_col: str = "status") -> None:
     """
-    Adds df['action'] and df['rationale'] in-place based on status.
+    Add df['action'] and df['rationale'] in-place based on status.
     Unknown statuses fall back to normal.
     """
     actions = []
     rationales = []
-    for s in df[status_col].astype(str).tolist():
-        meta = STATUS_TO_ACTION.get(s, STATUS_TO_ACTION["normal"])
+    for status in df[status_col].astype(str).tolist():
+        meta = STATUS_TO_ACTION.get(status, STATUS_TO_ACTION["normal"])
         actions.append(meta["action"])
         rationales.append(meta["rationale"])
     df["action"] = actions

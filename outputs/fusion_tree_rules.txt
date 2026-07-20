@@ -1,22 +1,37 @@
-|--- p_stress <= 0.42
+|--- p_stress <= 0.41
 |   |--- air_risk <= 0.65
-|   |   |--- p_trend <= 0.07
-|   |   |   |--- p_trend <= -0.03
+|   |   |--- p_stress <= 0.13
+|   |   |   |--- p_trend <= -0.01
+|   |   |   |   |--- p_trend <= -0.02
+|   |   |   |   |   |--- class: normal
+|   |   |   |   |--- p_trend >  -0.02
+|   |   |   |   |   |--- class: rising_stress
+|   |   |   |--- p_trend >  -0.01
 |   |   |   |   |--- class: normal
-|   |   |   |--- p_trend >  -0.03
-|   |   |   |   |--- class: normal
-|   |   |--- p_trend >  0.07
-|   |   |   |--- p_stress <= 0.18
-|   |   |   |   |--- class: normal
-|   |   |   |--- p_stress >  0.18
-|   |   |   |   |--- class: normal
+|   |   |--- p_stress >  0.13
+|   |   |   |--- p_trend <= 0.03
+|   |   |   |   |--- p_trend <= -0.02
+|   |   |   |   |   |--- class: rising_stress
+|   |   |   |   |--- p_trend >  -0.02
+|   |   |   |   |   |--- class: normal
+|   |   |   |--- p_trend >  0.03
+|   |   |   |   |--- p_trend <= 0.10
+|   |   |   |   |   |--- class: rising_stress
+|   |   |   |   |--- p_trend >  0.10
+|   |   |   |   |   |--- class: rising_stress
 |   |--- air_risk >  0.65
-|   |   |--- p_x_air <= 0.20
-|   |   |   |--- class: high_air_risk
-|   |   |--- p_x_air >  0.20
+|   |   |--- p_plus_air <= 1.00
+|   |   |   |--- p_trend <= -0.11
+|   |   |   |   |--- class: high_air_risk
+|   |   |   |--- p_trend >  -0.11
+|   |   |   |   |--- class: high_air_risk
+|   |   |--- p_plus_air >  1.00
 |   |   |   |--- class: elevated_context_risk
-|--- p_stress >  0.42
+|--- p_stress >  0.41
 |   |--- air_risk <= 0.65
-|   |   |--- class: high_physiological_risk
+|   |   |--- p_x_air <= 0.06
+|   |   |   |--- class: high_physiological_risk
+|   |   |--- p_x_air >  0.06
+|   |   |   |--- class: high_physiological_risk
 |   |--- air_risk >  0.65
 |   |   |--- class: high_risk_combined

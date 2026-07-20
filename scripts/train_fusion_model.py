@@ -81,15 +81,15 @@ def main() -> None:
 
     out_path = out_dir / "fusion_decision_tree.joblib"
     joblib.dump(bundle, out_path)
-    print("\n✅ Saved learned fusion model:", out_path)
+    print("\nSaved learned fusion model:", out_path)
 
     rules_path = PROJECT_ROOT / "outputs" / "fusion_tree_rules.txt"
     rules_path.write_text(rules_txt, encoding="utf-8")
-    print("✅ Saved tree rules:", rules_path)
+    print("Saved tree rules:", rules_path)
 
     meta_path = PROJECT_ROOT / "outputs" / "fusion_tree_meta.json"
     meta_path.write_text(json.dumps({"classes": bundle["classes"]}, indent=2), encoding="utf-8")
-    print("✅ Saved meta:", meta_path)
+    print("Saved meta:", meta_path)
 
 
 if __name__ == "__main__":

@@ -32,9 +32,9 @@ class UciAirQualityConfig:
     # Interpolation method for numeric columns
     interpolation_method: str = "time"
 
-    # If set, resample to this pandas frequency (e.g., "1H"). Dataset is already hourly,
+    # If set, resample to this pandas frequency (e.g., "1h"). Dataset is already hourly,
     # but this is useful if you later merge with other time series.
-    resample_freq: Optional[str] = "1H"
+    resample_freq: Optional[str] = "1h"
 
     # Columns used to build the timestamp
     date_col: str = "Date"

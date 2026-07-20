@@ -11,8 +11,8 @@ Notes:
 - The UCI Air Quality dataset contains "ground truth" columns like CO(GT), NO2(GT), NOx(GT)
   and multiple sensor signals PT08.S* that are less directly interpretable as pollutant levels.
 - This module defaults to using the GT columns when available.
-- Risk thresholds here are "reasonable engineering" defaults (not medical advice).
-  You can tune them later in your report/experiments.
+- Risk thresholds here are engineering defaults for scenario-based experiments.
+  They are not medical advice or regulatory thresholds.
 """
 
 from __future__ import annotations
@@ -20,28 +20,38 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Optional, Sequence, Tuple
 
-import numpy as np
 import pandas as pd
 
 
 @dataclass(frozen=True)
 class AirRiskConfig:
     """
-    Configuration for air risk scoring.
+    Configuration for air-risk scoring.
 
-    - thresholds_*: values at which each pollutant is considered "high" (maps near 1.0)
-    - weights_*: how much each pollutant contributes to overall risk
+    - thresholds_*: values at which each pollutant is considered "high" and maps near 1.0
+    - weights_*: how much each pollutant contributes to the overall pollutant risk
+
+    Default pollutant weights:
+    - CO  = 0.20
+    - NO2 = 0.40
+    - NOx = 0.40
+
+    These defaults give more weight to NO2 and NOx because they are useful
+    traffic-related outdoor pollution signals for a respiratory/physiological
+    strain scenario. CO is still included, but with a smaller default
+    contribution. The weights are configurable so the project can report
+    sensitivity analyses instead of claiming that one hand-tuned setting is
+    universally correct.
     """
-    # Which columns to use if present
+
     preferred_cols: Tuple[str, ...] = ("CO(GT)", "NO2(GT)", "NOx(GT)")
 
-    # Thresholds for normalization (value / threshold -> clipped to [0,1])
-    # These are practical defaults; adjust as you like.
-    co_high_mg_m3: float = 10.0     # CO (mg/m^3)
-    no2_high_ug_m3: float = 200.0   # NO2 (µg/m^3)
-    nox_high_ppb: float = 300.0     # NOx (ppb)
+    # Thresholds for normalization: value / threshold -> clipped to [0, 1].
+    co_high_mg_m3: float = 10.0
+    no2_high_ug_m3: float = 200.0
+    nox_high_ppb: float = 300.0
 
-    # Weights must sum to 1.0 (we'll normalize if they don't).
+    # Pollutant weights. They are normalized over available pollutant components.
     w_co: float = 0.2
     w_no2: float = 0.4
     w_nox: float = 0.4
@@ -50,13 +60,18 @@ class AirRiskConfig:
     use_weather_modifier: bool = True
     temp_col: str = "T"
     rh_col: str = "RH"
-    # Conditions where strain becomes relevant; mild effect only.
     temp_high_c: float = 30.0
     rh_high_pct: float = 70.0
-    weather_boost_max: float = 0.10  # at most +0.10 risk
+    weather_boost_max: float = 0.10
 
-    # Output column name
     risk_col: str = "air_risk_score"
+
+    def pollutant_weight_map(self) -> Dict[str, float]:
+        return {
+            "risk_CO": self.w_co,
+            "risk_NO2": self.w_no2,
+            "risk_NOx": self.w_nox,
+        }
 
 
 def _clip01(x: pd.Series) -> pd.Series:
@@ -65,7 +80,7 @@ def _clip01(x: pd.Series) -> pd.Series:
 
 def _safe_norm(series: pd.Series, denom: float) -> pd.Series:
     """
-    Normalize series by denom and clip to [0,1]. Handles missing/NaN gracefully.
+    Normalize series by denom and clip to [0, 1]. Handles missing values gracefully.
     """
     if denom <= 0:
         raise ValueError("Normalization denominator must be > 0.")
@@ -74,10 +89,33 @@ def _safe_norm(series: pd.Series, denom: float) -> pd.Series:
 
 def available_risk_inputs(df_aq: pd.DataFrame) -> Dict[str, bool]:
     """
-    Report which expected columns are present in the AQ dataframe.
+    Report which expected columns are present in the air-quality dataframe.
     """
     expected = ["CO(GT)", "NO2(GT)", "NOx(GT)", "T", "RH"]
     return {c: (c in df_aq.columns) for c in expected}
+
+
+def normalized_pollutant_weights(cfg: AirRiskConfig, component_columns: Sequence[str]) -> Dict[str, float]:
+    """
+    Return normalized weights for the pollutant components that are available.
+
+    If a pollutant is missing or excluded, the remaining pollutant weights are
+    re-normalized to sum to 1.0. The weather modifier is additive and is not part
+    of the pollutant weight sum.
+    """
+    raw = cfg.pollutant_weight_map()
+    weights = {col: raw[col] for col in component_columns if col in raw}
+    if not weights:
+        raise ValueError("No pollutant risk components were computed; cannot build risk score.")
+
+    w_sum = sum(weights.values())
+    if w_sum <= 0:
+        raise ValueError(
+            "Pollutant weights must sum to > 0. "
+            f"Received CO={cfg.w_co}, NO2={cfg.w_no2}, NOx={cfg.w_nox}."
+        )
+
+    return {col: value / w_sum for col, value in weights.items()}
 
 
 def compute_air_risk_components(
@@ -86,13 +124,13 @@ def compute_air_risk_components(
     columns_override: Optional[Sequence[str]] = None,
 ) -> pd.DataFrame:
     """
-    Compute per-pollutant normalized components (each in [0,1]) and optionally a weather modifier.
+    Compute per-pollutant normalized components and an optional weather modifier.
 
-    Returns a dataframe with component columns:
-      - risk_CO
-      - risk_NO2
-      - risk_NOx
-      - risk_weather (optional)
+    Returns columns:
+    - risk_CO
+    - risk_NO2
+    - risk_NOx
+    - risk_weather
     """
     cols = list(columns_override) if columns_override is not None else list(cfg.preferred_cols)
 
@@ -105,7 +143,6 @@ def compute_air_risk_components(
 
     components = pd.DataFrame(index=df_aq.index)
 
-    # Pollutant components
     if "CO(GT)" in cols:
         components["risk_CO"] = _safe_norm(df_aq["CO(GT)"], cfg.co_high_mg_m3)
     if "NO2(GT)" in cols:
@@ -113,11 +150,9 @@ def compute_air_risk_components(
     if "NOx(GT)" in cols:
         components["risk_NOx"] = _safe_norm(df_aq["NOx(GT)"], cfg.nox_high_ppb)
 
-    # Optional mild weather modifier: only boosts risk slightly under hot & humid conditions.
     if cfg.use_weather_modifier and (cfg.temp_col in df_aq.columns) and (cfg.rh_col in df_aq.columns):
         temp_excess = _clip01((df_aq[cfg.temp_col] - cfg.temp_high_c) / max(cfg.temp_high_c, 1e-6))
         rh_excess = _clip01((df_aq[cfg.rh_col] - cfg.rh_high_pct) / max(cfg.rh_high_pct, 1e-6))
-        # Combine (AND-ish) by multiplying, then scale to max boost.
         components["risk_weather"] = (temp_excess * rh_excess) * cfg.weather_boost_max
     else:
         components["risk_weather"] = 0.0
@@ -131,41 +166,12 @@ def compute_air_risk_score(
     columns_override: Optional[Sequence[str]] = None,
 ) -> pd.Series:
     """
-    Compute a single air risk score in [0,1] for each timestamp.
-
-    Steps:
-    1) compute normalized pollutant components in [0,1]
-    2) weighted sum of pollutant risks
-    3) add small weather modifier (optional)
-    4) clip to [0,1]
-
-    Returns:
-        pd.Series named cfg.risk_col
+    Compute a single air-risk score in [0, 1] for each timestamp.
     """
     comps = compute_air_risk_components(df_aq, cfg=cfg, columns_override=columns_override)
-
-    # Build weights based on which components exist
-    w = {}
-    if "risk_CO" in comps.columns:
-        w["risk_CO"] = cfg.w_co
-    if "risk_NO2" in comps.columns:
-        w["risk_NO2"] = cfg.w_no2
-    if "risk_NOx" in comps.columns:
-        w["risk_NOx"] = cfg.w_nox
-
-    if not w:
-        raise ValueError("No pollutant risk components were computed; cannot build risk score.")
-
-    # Normalize weights to sum to 1.0, just in case
-    w_sum = sum(w.values())
-    if w_sum <= 0:
-        raise ValueError("Weights must sum to > 0.")
-    for k in w:
-        w[k] = w[k] / w_sum
-
-    base_risk = sum(comps[k] * w[k] for k in w.keys())
+    weights = normalized_pollutant_weights(cfg, comps.columns)
+    base_risk = sum(comps[col] * weights[col] for col in weights)
     risk = _clip01(base_risk + comps.get("risk_weather", 0.0))
-
     risk.name = cfg.risk_col
     return risk
 
@@ -176,11 +182,7 @@ def attach_air_risk(
     columns_override: Optional[Sequence[str]] = None,
 ) -> pd.DataFrame:
     """
-    Return a copy of df_aq with:
-      - cfg.risk_col (air_risk_score)
-      - component columns (risk_CO, risk_NO2, risk_NOx, risk_weather)
-
-    Useful for debugging and explainability.
+    Return a copy of df_aq with component columns and cfg.risk_col attached.
     """
     out = df_aq.copy()
     comps = compute_air_risk_components(out, cfg=cfg, columns_override=columns_override)
